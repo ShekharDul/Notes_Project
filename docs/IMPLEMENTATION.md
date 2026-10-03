@@ -10,7 +10,7 @@ Storage uses immediate transactional appends, deterministic reorder/delete compa
 
 ## Verification and remaining release gates
 
-Release build passes with zero warnings/errors. All 27 xUnit cases pass. The WPF runtime smoke constructs/renders six views with zero binding errors and verifies that a displayed image can be undone without retaining a file lock. This check uses fabricated content, not a real selection or screen grab.
+Release build passes with zero warnings/errors. All 46 xUnit cases pass. The WPF runtime smoke constructs/renders six views with zero binding errors and verifies that a displayed image can be undone without retaining a file lock. This check uses fabricated content, not a real selection or screen grab. Native keyboard interaction also verified screenshot notes in the capture tray and text notes in the full notebook, including database persistence. The test-only tray is exposed to the desktop driver by removing its tool-window/taskbar-hidden style; production focus and editor handlers are used unchanged.
 
 The README’s interactive checklist is still a release gate. Real Notepad selection, overlay input/cancellation, non-activation under source-app focus, Windows 10 support, display scaling, and high-contrast keyboard navigation must be tested on actual target desktop configurations. These are not claimed as manually verified.
 
@@ -23,3 +23,11 @@ AI, accounts, sync, collaboration, telemetry, URL extraction, OCR, document edit
 ## Exact next feature
 
 **Multi-monitor region snipping with mixed-DPI correctness.** Extend the snapshot service’s display descriptors to enumerate monitors, show one appropriately scaled overlay per display, and translate selected logical bounds to physical pixels. Keep the explicit one-shot privacy model. Validate negative display coordinates and 100%/150% mixed-DPI arrangements before shipping it. Complete the existing MVP manual QA gates before adding this feature.
+
+## Capture and note fixes
+
+The corrected executable is `artifacts/Clips-win-x64-fixed/Clips.App.exe`; the old output was locked by a running process during replacement. Quit the old instance before starting this build. Existing notebooks use the same storage path and schema.
+
+Selected-text capture now discovers providers within the active accessibility window instead of requiring TextPattern on the single focused control. Focused controls and ancestors are preferred; a bounded visible subtree search handles hosted PDF/document providers. Password branches, unrelated windows, full-document reads, clipboard fallback, and passive monitoring remain excluded. Provider failures, timeout, window-switch races, and oversized selections have distinct non-content diagnostics and user messages. The new discovery cases are covered by fake-provider regression tests.
+
+The tray no longer permanently sets WS_EX_NOACTIVATE on editable windows. ShowActivated=false preserves non-activating opening; an intentional click may activate the panel. Expanding Add note brings the editor into view and assigns actual keyboard focus. Native keyboard entry/save was verified with fabricated text and screenshot data. Chrome PDF verification remains pending: automatic approval review denied Computer Use access to Google Chrome, so the user must retry their PDF with the updated executable.

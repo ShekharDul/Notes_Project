@@ -14,13 +14,22 @@ public static class NativeWindows
         window.SourceInitialized += (_, _) =>
         {
             var handle = new WindowInteropHelper(window).Handle;
-            SetWindowLong(handle, -20, GetWindowLong(handle, -20) | 0x08000000 | 0x80);
+            var style = GetWindowLong(handle, -20) | 0x80;
+            // ShowActivated=false prevents focus stealing on Show(). Editable windows must
+            // remain activatable afterward; permanently setting NOACTIVATE prevents reliable typing.
+            SetWindowLong(handle, -20, clickActivates ? style & ~0x08000000 : style | 0x08000000);
             // MA_ACTIVATE for an intentional mouse click; opening itself remains non-activating.
             HwndSource.FromHwnd(handle)?.AddHook((nint hwnd, int message, nint w, nint l, ref bool handled) =>
             {
                 if (message == 0x21) { handled = true; return new nint(clickActivates ? 1 : 3); } return 0;
             });
         };
+        if (clickActivates)
+        {
+            // Explicit user interaction may activate the panel before WPF focuses its editor.
+            window.PreviewMouseDown += (_, _) => window.Activate();
+            window.PreviewTouchDown += (_, _) => window.Activate();
+        }
     }
     public static void PlaceBottomRight(Window window)
     {

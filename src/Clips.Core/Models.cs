@@ -18,7 +18,7 @@ public sealed record CaptureSession(Guid Id, Guid NotebookId, DateTime StartedAt
 public sealed record SourceContext(string? AppName = null, string? WindowTitle = null);
 public sealed record CaptureItem(Guid Id, Guid NotebookId, Guid SessionId, CaptureType Type, string? ContentText, string? ImageRelativePath, string? UserNote, string? SourceAppName, string? SourceWindowTitle, string? SourceUrl, string? SourceDocumentName, string? SourcePageHint, DateTime CapturedAtUtc, int DisplayOrder, DateTime CreatedAtUtc, DateTime UpdatedAtUtc);
 public sealed record AppSettings(string TextCaptureShortcut = "Ctrl+Alt+S", string ImageCaptureShortcut = "Ctrl+Alt+A", string OpenTrayShortcut = "Ctrl+Alt+N", bool NotificationsEnabled = true, bool StartMinimizedToTray = false, AppTheme Theme = AppTheme.System);
-public enum SelectionStatus { Success, NoSelection, UnsupportedApplication, AccessDeniedOrSecureControl, UnexpectedError }
+public enum SelectionStatus { Success, NoSelection, UnsupportedApplication, AccessDeniedOrSecureControl, UnexpectedError, TimedOut, ProviderError, ForegroundChanged, SelectionTooLarge }
 public sealed record SelectionResult(SelectionStatus Status, string? Text = null, SourceContext? Source = null);
 public sealed record CaptureOutcome(CaptureItem? Item, string Message, bool OfferScreenshot = false, bool OpenApp = false);
 
@@ -56,6 +56,10 @@ public static partial class Rules
     {
         SelectionStatus.NoSelection => new(null, "No selected text found. Select text, then try again.", true, true),
         SelectionStatus.AccessDeniedOrSecureControl => new(null, "Capture is unavailable for this secure or excluded app.", false, true),
+        SelectionStatus.TimedOut => new(null, "This app took too long to share its selection. Try again or capture a screenshot.", true, true),
+        SelectionStatus.ProviderError => new(null, "This app’s accessibility reader failed. Try again or capture a screenshot.", true, true),
+        SelectionStatus.ForegroundChanged => new(null, "The active window changed. Select the text and try again.", false, true),
+        SelectionStatus.SelectionTooLarge => new(null, "The selection is too large. Select a smaller passage and try again.", true, true),
         _ => new(null, "We couldn’t read selected text from this app.", true, true)
     };
     [GeneratedRegex("^#[0-9a-fA-F]{6}$")] private static partial Regex HexColor();

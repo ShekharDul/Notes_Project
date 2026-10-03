@@ -4,6 +4,8 @@ A quiet Windows desktop capture notebook. Create a notebook, start a session, th
 
 ## Run the built application
 
+The corrected selection/note build from this update is **`artifacts/Clips-win-x64-fixed/Clips.App.exe`**. Windows still locked the original running executable during publishing, so this version is delivered separately. Quit the original instance from its system-tray menu before launching the corrected one. Both use the same existing local data directory; no data migration or reset is required.
+
 The generated **`artifacts/Clips-win-x64/Clips.App.exe`** is a self-contained, single-file Windows x64 application. Double-click it; no separate .NET runtime is required. Build artifacts are ignored by Git. This executable is unsigned and is not an installer.
 
 On first launch, create a notebook with a name, colour, and optional icon. Creating a notebook does not start capture. Press **Start session** to hide the main window and enable capture shortcuts. Use the Windows notification-area icon to reopen the app, pause/resume capture, end the session, or quit. Closing the main window or capture tray hides it. Quit is an explicit tray action. Pin the icon in Windows’ notification area if it is in the overflow menu.
@@ -67,8 +69,8 @@ Notes use **explicit Save note** controls in both views. The unsaved state is vi
 The exact directory is shown in Settings with an **Open data folder** action. SQLite may also create `clips.db-wal` and `clips.db-shm` while running. The working name and storage-directory name are isolated in `Clips.Core/Product`; change the display name separately from the storage name to preserve existing data.
 
 - The application contains no network client, login, analytics, cloud storage, clipboard access, keyboard hooks, or selection polling.
-- Text is read only following an explicit capture hotkey. It checks the foreground/focused process and rejects password elements, the application itself, and an editable process-name exclusion set initially containing `1Password`, `KeePass`, `KeePassXC`, and `Bitwarden`. This set is configurable in the Windows service’s `ExcludedProcessNames` property; there is no exclusion-list editor in this MVP.
-- Only accessible **selected text** is requested. No browser history, URL extraction, full documents, or automatic content collection. Source URL/document/page fields remain null.
+- Text is read only following an explicit capture hotkey. It confines selection-provider discovery to the foreground window and rejects password elements, the application itself, and an editable process-name exclusion set initially containing `1Password`, `KeePass`, `KeePassXC`, and `Bitwarden`. This set is configurable in the Windows service’s `ExcludedProcessNames` property; there is no exclusion-list editor in this MVP.
+- Only accessible **selected text** is requested. Discovery checks the focused element and its ancestors, then breadth-first searches at most 256 visible foreground-window elements to a depth of 16. Window membership uses accessibility ancestry rather than matching process IDs, so hosted/multiprocess document providers are permitted. Password and offscreen branches are skipped. It reads selection ranges only, never the full document range. Foreground changes discard the result; provider errors, timeouts, and oversized selections have distinct messages. No browser history, URL extraction, full documents, or automatic content collection. Source URL/document/page fields remain null.
 - Snipping takes one in-memory primary-display snapshot after the explicit shortcut. Only the chosen region is persisted. Escape and regions smaller than 8×8 physical pixels save nothing. No full-screen image is written to disk and no recording session exists.
 - Diagnostics contain constant event identifiers, UTC times, and numeric error codes. Captures, notes, notebook names, window titles, and exception messages are never logged. Logs roll at 1 MB and keep three previous files.
 - Content is stored **unencrypted locally**, subject to the Windows user profile’s permissions. The app does not claim protection against another process running as the same user. Use Windows device encryption where needed.
@@ -89,8 +91,8 @@ Settings allow distinct Ctrl+Alt combinations with letters or F1–F12, validate
 ## Verification performed
 
 - Release solution build: **0 warnings, 0 errors**.
-- **27 passing xUnit cases**: validation, migrations/reopening, one-open-session enforcement, transitions/restoration, normalization/paragraphs, ordering/reordering, parallel appends, notes/settings, fallbacks, no-session/paused behavior, undo, image cleanup, orphan recovery, path validation, and transactional rollback through an injected SQLite trigger.
-- WPF smoke: six views constructed and rendered with **zero binding errors**; text/image persistence and image Undo after rendering checked. Generated images and result are in `artifacts/smoke/`.
+- **46 passing xUnit cases**: validation, migrations/reopening, one-open-session enforcement, transitions/restoration, normalization/paragraphs, ordering/reordering, parallel appends, notes/settings, fallbacks, no-session/paused behavior, undo, image cleanup, orphan recovery, path validation, and transactional rollback through an injected SQLite trigger.
+- WPF smoke: six views constructed and rendered with **zero binding errors**; text/image persistence and image Undo after rendering checked. Generated images and result are in `artifacts/smoke/`. Native keyboard QA additionally verified screenshot-note typing/saving in the capture tray and text-note typing/saving in the notebook against an isolated temporary SQLite database. Add note scrolls its editor into view and gives it keyboard focus; merely opening the tray still uses non-activating Show().
 
 To repeat the runtime smoke check on an interactive Windows desktop:
 
@@ -98,7 +100,7 @@ To repeat the runtime smoke check on an interactive Windows desktop:
 dotnet run --project tools/Clips.Smoke -c Release -- artifacts/smoke
 ```
 
-It briefly opens real WPF views, writes rendered PNGs, uses fabricated source content, and deletes its isolated temporary data on successful exit. This is **not** evidence that every interactive acceptance criterion passes. Native focus behavior, text selection from real apps, snipping input, mixed-DPI displays, and Windows-version compatibility require the manual checks below.
+It briefly opens real WPF views, writes rendered PNGs, uses fabricated source content, and deletes its isolated temporary data on successful exit. This is **not** evidence that every interactive acceptance criterion passes. Real-app selected-text retrieval (including Chrome PDF), focus relative to external source apps, snipping input, mixed-DPI displays, and Windows-version compatibility require the manual checks below. The attempted Chrome desktop test was denied by the computer-use permission layer; no Chrome/PDF compatibility claim is based on it.
 
 ## Known limitations
 
