@@ -1,12 +1,16 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Automation.Peers;
+using System.Windows.Automation.Provider;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Clips.App;
 using Clips.Core;
 using Clips.Infrastructure;
+using Microsoft.Data.Sqlite;
 
 namespace Clips.Smoke;
 // Developer-only runtime smoke check, using fabricated content and an isolated temporary database.
@@ -41,6 +45,7 @@ public static class Program
                 var notebook = await notebookService.CreateAsync("Field notes", "#2B897F", "🌿"); var session = await store.StartSessionAsync(notebook.Id);
                 await captures.CaptureTextAsync(); var bytes = DemoPng(); var imageCapture = (await captures.CaptureImageAsync(session.Id, bytes, new("Demo app", "A captured figure"))).Item!;
                 await shell.RefreshAsync(notebook.Id); await Render(main, output, "notebook");
+                await VerifyNoteSaving(main, shell, paths, notebook.Id, output);
                 using (var hotkeys = new GlobalHotkeyService()) hotkeys.Apply(new(), false);
                 var tray = new CaptureTray(shell, () => main.Show());
                 tray.Show(); await Render(tray, output, "capture-tray");
@@ -81,6 +86,82 @@ public static class Program
         var rendered = new RenderTargetBitmap((int)window.ActualWidth, (int)window.ActualHeight, 96, 96, PixelFormats.Pbgra32); rendered.Render(window);
         var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(rendered));
         await using var file = File.Create(Path.Combine(output, name + ".png")); encoder.Save(file);
+    }
+    private static async Task VerifyNoteSaving(MainWindow main, ShellViewModel shell, AppPaths paths, Guid notebookId, string output)
+    {
+        var capture = shell.Captures.Single(c => c.IsText);
+        var timeline = (ListBox)main.FindName("Timeline");
+        capture.Note = string.Join("\n", Enumerable.Repeat("A multiline draft", 30));
+        main.UpdateLayout();
+        var scroll = Descendants<ScrollViewer>(timeline).First();
+        timeline.UnselectAll(); scroll.ScrollToVerticalOffset(80);
+        await Task.Delay(100); main.UpdateLayout();
+        var offset = scroll.VerticalOffset;
+        if (offset <= 0) throw new InvalidOperationException("The note regression fixture must be scrolled.");
+        timeline.SelectedItem = capture; main.UpdateLayout(); await Task.Delay(100);
+        if (Math.Abs(scroll.VerticalOffset - offset) > 0.1) throw new InvalidOperationException("Selecting a note card moved its Save button.");
+        // Invoke the real template button, rather than calling the store directly.
+        var save = Descendants<Button>(timeline).Single(b => Equals(b.Content, "Save note") && ReferenceEquals(b.DataContext, capture));
+        var expected = capture.Note;
+        ((IInvokeProvider)new ButtonAutomationPeer(save).GetPattern(PatternInterface.Invoke)).Invoke();
+        await Task.Delay(100);
+        if (capture.SaveNoteCommand.ExecutionTask is { } task) await task;
+        if (capture.IsDirty || !capture.NoteStatus.Contains("successfully")) throw new InvalidOperationException("Save note did not confirm persistence.");
+        using (var reopened = new SqliteNotebookStore(paths))
+        {
+            await reopened.InitializeAsync();
+            if ((await reopened.GetCapturesAsync(notebookId)).Single(c => c.Id == capture.Item.Id).UserNote != expected)
+                throw new InvalidOperationException("Saved text note did not survive reopening the database.");
+        }
+        // Inject a write failure to verify that the draft remains editable and retry works.
+        using (var connection = new SqliteConnection($"Data Source={paths.Database};Pooling=False"))
+        {
+            connection.Open(); using var command = connection.CreateCommand();
+            command.CommandText = "CREATE TRIGGER smoke_note_failure BEFORE UPDATE OF UserNote ON CaptureItem BEGIN SELECT RAISE(ABORT, 'injected failure'); END;";
+            command.ExecuteNonQuery();
+            capture.Note = "Draft retained after a failed save";
+            await capture.SaveNoteCommand.ExecuteAsync(null);
+            if (!capture.IsDirty || !capture.NoteStatus.Contains("wasn’t saved") || capture.Note != "Draft retained after a failed save")
+                throw new InvalidOperationException("Failed save lost its draft or lacked inline feedback.");
+            command.CommandText = "DROP TRIGGER smoke_note_failure;"; command.ExecuteNonQuery();
+        }
+        await capture.SaveNoteCommand.ExecuteAsync(null);
+        if (capture.IsDirty) throw new InvalidOperationException("Retrying the failed note save failed.");
+        using (var connection = new SqliteConnection($"Data Source={paths.Database};Pooling=False"))
+        {
+            connection.Open(); using var transaction = connection.BeginTransaction();
+            using var command = connection.CreateCommand(); command.Transaction = transaction;
+            command.CommandText = "UPDATE Notebook SET UpdatedAtUtc=UpdatedAtUtc;"; command.ExecuteNonQuery();
+            capture.Note = "Snapshot submitted for saving";
+            var pendingSave = capture.SaveNoteCommand.ExecuteAsync(null);
+            await Task.Delay(100);
+            if (!capture.SaveNoteCommand.IsRunning || capture.SaveNoteCommand.CanExecute(null) || capture.NoteStatus != "Saving note…")
+                throw new InvalidOperationException("Pending save lacks feedback or permits duplicate writes.");
+            capture.Note = "New edit while save is pending";
+            transaction.Commit(); await pendingSave;
+            if (!capture.IsDirty || capture.Note != "New edit while save is pending" ||
+                (await shell.Store.GetCapturesAsync(notebookId)).Single(c => c.Id == capture.Item.Id).UserNote != "Snapshot submitted for saving")
+                throw new InvalidOperationException("An edit made during saving was lost or incorrectly marked saved.");
+        }
+        await capture.SaveNoteCommand.ExecuteAsync(null);
+        capture.Note = ""; await capture.SaveNoteCommand.ExecuteAsync(null);
+        if ((await shell.Store.GetCapturesAsync(notebookId)).Single(c => c.Id == capture.Item.Id).UserNote != null)
+            throw new InvalidOperationException("Clearing a saved note failed.");
+        await shell.RefreshAsync(notebookId);
+        if (capture.IsDirty) throw new InvalidOperationException("Refresh marked a saved note unsaved.");
+        await shell.OpenCaptureAsync(capture.Item); await Task.Delay(100); main.UpdateLayout();
+        if (!ReferenceEquals(timeline.SelectedItem, capture) || scroll.VerticalOffset >= offset)
+            throw new InvalidOperationException("Explicit Open capture did not navigate to the requested card.");
+        await File.WriteAllTextAsync(Path.Combine(output, "note-save-result.txt"), "Card selection preserves scroll position: passed\nTemplate Save note button persists multiline text: passed\nSaved note survives database reopen: passed\nFailed write retains draft and displays error: passed\nPending save blocks duplicates and preserves new edits: passed\nRetry, clear, and refresh: passed\nExplicit Open capture navigation: passed\n");
+    }
+    private static IEnumerable<T> Descendants<T>(DependencyObject root) where T : DependencyObject
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is T match) yield return match;
+            foreach (var nested in Descendants<T>(child)) yield return nested;
+        }
     }
     private static byte[] DemoPng()
     {

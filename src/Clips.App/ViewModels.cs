@@ -26,7 +26,7 @@ public partial class CaptureViewModel : ObservableObject
         Item = item; this.shell = shell; note = item.UserNote ?? "";
         ImagePath = item.ImageRelativePath == null ? null : images.Resolve(item.ImageRelativePath);
         if (ImagePath != null) _ = LoadPreviewAsync(ImagePath);
-        SaveNoteCommand = new AsyncRelayCommand(() => shell.Safe(async () => { var saved = Rules.Note(Note); await shell.Store.SaveNoteAsync(Item.Id, saved); Item = Item with { UserNote = saved }; OnPropertyChanged(nameof(NoteStatus)); }));
+        SaveNoteCommand = new AsyncRelayCommand(SaveNoteAsync);
         DeleteCommand = new AsyncRelayCommand(() => shell.Safe(async () =>
         {
             if (!Dialogs.Confirm("Delete this capture?", "The capture and its attached note will be removed.", "Delete capture")) return;
@@ -54,9 +54,40 @@ public partial class CaptureViewModel : ObservableObject
         catch (UnauthorizedAccessException) { shell.Error = "A screenshot file could not be opened. Check its file permissions."; }
         catch (NotSupportedException) { shell.Error = "A screenshot file could not be decoded."; }
     }
-    partial void OnNoteChanged(string value) => OnPropertyChanged(nameof(NoteStatus));
+    private bool savingNote;
+    private string? noteSaveError;
+    private bool noteSaved;
+    private async Task SaveNoteAsync()
+    {
+        // Snapshot the draft: edits made while the database write awaits remain unsaved.
+        var draft = Note;
+        shell.Error = "";
+        savingNote = true; noteSaveError = null; noteSaved = false; NotifyNoteState();
+        try
+        {
+            var saved = Rules.Note(draft);
+            await shell.Store.SaveNoteAsync(Item.Id, saved);
+            Item = Item with { UserNote = saved };
+            noteSaved = true;
+        }
+        catch (Exception ex)
+        {
+            shell.ReportFailure(ex);
+            noteSaveError = "Note wasn’t saved. Your draft is still here. Try Save note again.";
+        }
+        finally { savingNote = false; NotifyNoteState(); }
+    }
+    private void NotifyNoteState()
+    {
+        OnPropertyChanged(nameof(IsDirty)); OnPropertyChanged(nameof(NoteStatus));
+    }
+    partial void OnNoteChanged(string value)
+    {
+        noteSaveError = null; noteSaved = false; NotifyNoteState();
+    }
     public bool IsDirty => Note != (Item.UserNote ?? "");
-    public string NoteStatus => IsDirty ? "Unsaved note · press Save note" : "Note saved locally";
+    public string NoteStatus => savingNote ? "Saving note…" : noteSaveError ??
+        (IsDirty ? "Unsaved note · press Save note" : noteSaved ? "Note saved successfully on this device" : "Note saved locally");
     public bool IsText => Item.Type == CaptureType.Text;
     public bool IsImage => Item.Type == CaptureType.Image;
     public string? Text => Item.ContentText;
@@ -70,7 +101,7 @@ public partial class CaptureViewModel : ObservableObject
     public IAsyncRelayCommand MoveUpCommand { get; }
     public IAsyncRelayCommand MoveDownCommand { get; }
     public IRelayCommand ExpandCommand { get; }
-    public void Update(CaptureItem item) { Item = item; OnPropertyChanged(nameof(Number)); OnPropertyChanged(nameof(NoteStatus)); }
+    public void Update(CaptureItem item) { Item = item; OnPropertyChanged(nameof(Number)); NotifyNoteState(); }
 }
 public partial class ShellViewModel : ObservableObject
 {
@@ -86,6 +117,7 @@ public partial class ShellViewModel : ObservableObject
     public event Action? SessionStarted;
     public event Action<int>? SessionEnded;
     public event Action? SettingsRequested;
+    public event Action<CaptureViewModel>? CaptureOpened;
     public ObservableCollection<NotebookRow> Notebooks { get; } = [];
     public ObservableCollection<CaptureViewModel> Captures { get; } = [];
     public ObservableCollection<CaptureViewModel> Recent { get; } = [];
@@ -162,7 +194,12 @@ public partial class ShellViewModel : ObservableObject
     public async Task Safe(Func<Task> work)
     {
         try { Error = ""; await work(); }
-        catch (Exception ex) { log.Event("operation.failed", ex.HResult); Error = ex is ArgumentException or InvalidOperationException ? ex.Message : "Couldn’t save this change. Check that the local data folder is writable and try again."; }
+        catch (Exception ex) { ReportFailure(ex); }
+    }
+    internal void ReportFailure(Exception ex)
+    {
+        log.Event("operation.failed", ex.HResult);
+        Error = ex is ArgumentException or InvalidOperationException ? ex.Message : "Couldn’t save this change. Check that the local data folder is writable and try again.";
     }
     public async Task RefreshAsync(Guid? selectId = null)
     {
@@ -237,5 +274,6 @@ public partial class ShellViewModel : ObservableObject
     public async Task OpenCaptureAsync(CaptureItem item)
     {
         ShowArchived = false; await RefreshAsync(item.NotebookId); SelectedCapture = Captures.FirstOrDefault(c => c.Item.Id == item.Id);
+        if (SelectedCapture != null) CaptureOpened?.Invoke(SelectedCapture);
     }
 }

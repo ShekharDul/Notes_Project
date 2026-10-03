@@ -4,7 +4,7 @@ A quiet Windows desktop capture notebook. Create a notebook, start a session, th
 
 ## Run the built application
 
-The corrected selection/note build from this update is **`artifacts/Clips-win-x64-fixed/Clips.App.exe`**. Windows still locked the original running executable during publishing, so this version is delivered separately. Quit the original instance from its system-tray menu before launching the corrected one. Both use the same existing local data directory; no data migration or reset is required.
+The latest corrected build is **`artifacts/Clips-win-x64-note-fixed/Clips.App.exe`**, including the selection/tray fixes and notebook Save note correction. Quit the previous instance from its system-tray menu before launching this version. All builds use the same existing local data directory; no data migration or reset is required.
 
 The generated **`artifacts/Clips-win-x64/Clips.App.exe`** is a self-contained, single-file Windows x64 application. Double-click it; no separate .NET runtime is required. Build artifacts are ignored by Git. This executable is unsigned and is not an installer.
 

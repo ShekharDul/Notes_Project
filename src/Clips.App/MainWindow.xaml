@@ -32,7 +32,7 @@
       <Border BorderBrush="{DynamicResource Accent}" BorderThickness="3,0,0,0" Padding="15,2" Visibility="{Binding IsText,Converter={StaticResource BoolVisibility}}"><TextBlock Text="{Binding Text}" TextWrapping="Wrap" FontSize="16" LineHeight="25"/></Border>
       <Button Command="{Binding ExpandCommand}" Visibility="{Binding IsImage,Converter={StaticResource BoolVisibility}}" ToolTip="Expand screenshot" Padding="0"><Image Source="{Binding PreviewImage}" MaxHeight="300" Stretch="Uniform"/></Button>
       <TextBlock Text="Attached note" FontWeight="SemiBold" FontSize="12" Margin="0,20,0,5"/><TextBox Text="{Binding Note,UpdateSourceTrigger=PropertyChanged}" MaxLength="10000" AcceptsReturn="True" MinHeight="64" MaxHeight="230" VerticalScrollBarVisibility="Auto" TextWrapping="Wrap" AutomationProperties.Name="Attached note"/>
-      <TextBlock Text="{Binding NoteStatus}" FontSize="11" Foreground="{DynamicResource Muted}" Margin="3,4"/>
+      <TextBlock Text="{Binding NoteStatus}" FontSize="11" Foreground="{DynamicResource Muted}" Margin="3,4" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>
       <WrapPanel><Button Content="Save note" Command="{Binding SaveNoteCommand}"/><Button Content="↑ Move up" Command="{Binding MoveUpCommand}"/><Button Content="↓ Move down" Command="{Binding MoveDownCommand}"/><Button Content="Delete" Command="{Binding DeleteCommand}"/></WrapPanel>
      </StackPanel></Border></DataTemplate></ListBox.ItemTemplate>
     </ListBox>
