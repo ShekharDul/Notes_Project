@@ -4,11 +4,11 @@ A quiet Windows desktop capture notebook. Create a notebook, start a session, th
 
 ## Run the built application
 
-The latest corrected build is **`artifacts/Clips-win-x64-note-fixed/Clips.App.exe`**, including the selection/tray fixes and notebook Save note correction. Quit the previous instance from its system-tray menu before launching this version. All builds use the same existing local data directory; no data migration or reset is required.
+The latest build is **`artifacts/Clips-win-x64-panel/Clips.App.exe`**, including the floating session panel and earlier capture/note fixes. Quit the previous instance from its system-tray menu before launching this version. All builds use the same existing local data directory; no data migration or reset is required.
 
 The generated **`artifacts/Clips-win-x64/Clips.App.exe`** is a self-contained, single-file Windows x64 application. Double-click it; no separate .NET runtime is required. Build artifacts are ignored by Git. This executable is unsigned and is not an installer.
 
-On first launch, create a notebook with a name, colour, and optional icon. Creating a notebook does not start capture. Press **Start session** to hide the main window and enable capture shortcuts. Use the Windows notification-area icon to reopen the app, pause/resume capture, end the session, or quit. Closing the main window or capture tray hides it. Quit is an explicit tray action. Pin the icon in Windows’ notification area if it is in the overflow menu.
+Opening Clips always shows the main window, including when a session is restored. Opening it again brings the running instance forward. On first launch, create a notebook with a name, colour, and optional icon. Creating a notebook does not start capture. Press **Start session** to hide the main window and show a small floating panel. **Recent captures** opens the existing capture tray for review and notes; **Open notebook** brings back the main window. Drag the panel’s notebook/status header to reposition it. It stays above other apps without taking focus when shown, remains available while paused, and temporarily hides during screenshot capture. Ending the session removes the panel and reopens the notebook. Use the Windows notification-area icon to pause/resume, end the session, or quit. Closing the main window or capture tray hides it. Quit is an explicit tray action.
 
 ## Prerequisites and development
 

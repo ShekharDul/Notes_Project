@@ -74,7 +74,7 @@ public sealed class SettingsWindow : Window
         Label("Open capture tray"); var tray = new TextBox { Text = settings.OpenTrayShortcut }; panel.Children.Add(tray);
         Label("Use Ctrl+Alt with a letter or F1–F12. Some Windows apps do not expose selected text to accessibility tools. Use image capture for those apps.");
         var notify = new CheckBox { Content = "Enable capture notifications", IsChecked = settings.NotificationsEnabled, Margin = new Thickness(3, 12, 3, 5) }; panel.Children.Add(notify);
-        var minimize = new CheckBox { Content = "Start minimized to tray", IsChecked = settings.StartMinimizedToTray, Margin = new Thickness(3, 5, 3, 5) }; panel.Children.Add(minimize);
+        Label("Opening Clips shows your notebook. Start a session to switch to the floating capture panel.");
         Label("Privacy and storage"); Label($"{Product.Name} stores your notebooks, notes, and captures locally on this device. It does not send your content to a server.");
         panel.Children.Add(new TextBox { Text = paths.Root, IsReadOnly = true, TextWrapping = TextWrapping.Wrap });
         var folder = new Button { Content = "Open data folder", HorizontalAlignment = HorizontalAlignment.Left }; folder.Click += (_, _) => System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(paths.Root) { UseShellExecute = true }); panel.Children.Add(folder);
@@ -83,7 +83,7 @@ public sealed class SettingsWindow : Window
         apply.Click += async (_, _) =>
         {
             apply.IsEnabled = false;
-            try { var next = new AppSettings(text.Text.Trim(), image.Text.Trim(), tray.Text.Trim(), notify.IsChecked == true, minimize.IsChecked == true, (AppTheme)theme.SelectedItem); Hotkey.Validate(next); status.Text = await save(next); }
+            try { var next = new AppSettings(text.Text.Trim(), image.Text.Trim(), tray.Text.Trim(), notify.IsChecked == true, false, (AppTheme)theme.SelectedItem); Hotkey.Validate(next); status.Text = await save(next); }
             catch (Exception ex) { status.Text = ex is ArgumentException ? ex.Message : "Couldn’t save settings. Check your local storage folder."; }
             finally { apply.IsEnabled = true; }
         };

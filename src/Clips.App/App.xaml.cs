@@ -14,12 +14,15 @@ public partial class App : Application
     private ShellViewModel shell = null!;
     private MainWindow main = null!;
     private CaptureTray tray = null!;
+    private SessionPanel panel = null!;
     private GlobalHotkeyService hotkeys = null!;
     private AppSettings settings = new();
     private Forms.NotifyIcon? icon;
     private Drawing.Icon? stateIcon;
     private ToastWindow? toast;
     private Mutex? singleInstance;
+    private EventWaitHandle? openRequested;
+    private RegisteredWaitHandle? openListener;
     private bool ownsMutex;
     private bool capturing;
     private bool shuttingDown;
@@ -27,8 +30,9 @@ public partial class App : Application
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        openRequested = new EventWaitHandle(false, EventResetMode.AutoReset, $"Local\\{Product.StorageDirectoryName}.Desktop.OpenMain");
         singleInstance = new Mutex(true, $"Local\\{Product.StorageDirectoryName}.Desktop.SingleInstance", out ownsMutex);
-        if (!ownsMutex) { MessageBox.Show($"{Product.Name} is already running. Open it from the Windows system tray.", Product.Name); Shutdown(); return; }
+        if (!ownsMutex) { NativeWindows.AllowExistingInstanceActivation(); openRequested.Set(); Shutdown(); return; }
         try
         {
             var collection = new ServiceCollection();
@@ -45,9 +49,10 @@ public partial class App : Application
             shell = services.GetRequiredService<ShellViewModel>(); await shell.RefreshAsync();
             main = new MainWindow(shell); MainWindow = main;
             tray = new CaptureTray(shell, () => _ = Guard(async () => { if (shell.Session != null) await shell.RefreshAsync(shell.Session.NotebookId); ShowMain(); }));
+            panel = new SessionPanel(shell, ShowRecent, ShowMain);
             hotkeys = new GlobalHotkeyService(); hotkeys.Pressed += id => _ = HandleHotkeyAsync(id);
             shell.StateChanged += SyncSession; shell.SessionStarted += OnSessionStarted; shell.SettingsRequested += ShowSettings;
-            shell.SessionEnded += count => Notify($"Session ended. {count} captures saved.", []);
+            shell.SessionEnded += count => { ShowMain(); Notify($"Session ended. {count} captures saved.", []); };
             CreateSystemTray(); SyncSession();
             SystemEvents.UserPreferenceChanged += OnUserPreferences;
             DispatcherUnhandledException += (_, args) =>
@@ -56,7 +61,8 @@ public partial class App : Application
                 args.Handled = true; Notify("Something went wrong. Open the notebook to check whether your change was saved.", [("Open " + Product.Name, ShowMain)], true);
             };
             services.GetRequiredService<ILocalLog>().Event("application.started");
-            if (shell.Session == null && (!settings.StartMinimizedToTray || shell.Notebooks.Count == 0)) ShowMain();
+            openListener = ThreadPool.RegisterWaitForSingleObject(openRequested, (_, _) => Dispatcher.InvokeAsync(() => { if (!shuttingDown) ShowMain(); }), null, Timeout.Infinite, false);
+            ShowMain();
             if (hotkeyErrors.Count > 0) Notify(string.Join(" ", hotkeyErrors), [("Settings", ShowSettings)], true);
         }
         catch (Exception ex)
@@ -67,6 +73,18 @@ public partial class App : Application
         }
     }
     private void ShowMain() { main.Show(); main.WindowState = WindowState.Normal; main.Activate(); }
+    private void ShowRecent()
+    {
+        if (capturing) return;
+        PositionAbovePanel(tray); tray.Show();
+    }
+    private void PositionAbovePanel(Window window)
+    {
+        if (!panel.IsVisible) { NativeWindows.PlaceBottomRight(window); return; }
+        var area = SystemParameters.WorkArea;
+        window.Left = Math.Clamp(panel.Left + panel.Width - window.Width, area.Left, Math.Max(area.Left, area.Right - window.Width));
+        window.Top = Math.Max(area.Top, panel.Top - window.Height - 8);
+    }
     private void ShowSettings()
     {
         var window = new SettingsWindow(settings, services!.GetRequiredService<AppPaths>(), async next =>
@@ -77,12 +95,14 @@ public partial class App : Application
     }
     private void OnSessionStarted()
     {
-        main.Hide(); Notify($"Session started — saving to {shell.TrayLabel}.", []);
+        main.Hide(); panel.SyncSession(); Notify($"Session started — saving to {shell.TrayLabel}.", []);
         if (hotkeyErrors.Count > 0) Notify(string.Join(" ", hotkeyErrors), [("Settings", ShowSettings)], true);
     }
     private void SyncSession()
     {
         if (shuttingDown) return;
+        panel.SyncSession();
+        if (shell.Session == null) tray.Hide();
         hotkeyErrors = hotkeys.Apply(settings, shell.Session?.Status == SessionStatus.Active);
         if (hotkeyErrors.Count > 0) shell.Error = string.Join("\n", hotkeyErrors);
         if (icon == null) return;
@@ -110,7 +130,7 @@ public partial class App : Application
     {
         var menu = new Forms.ContextMenuStrip();
         void Add(string label, Action action) => menu.Items.Add(label, null, (_, _) => Dispatcher.InvokeAsync(action));
-        Add("Open " + Product.Name, ShowMain); Add("Show capture tray", () => tray.Show());
+        Add("Open " + Product.Name, ShowMain); Add("Show capture tray", ShowRecent);
         Add("Pause capture", () => _ = Guard(shell.TogglePauseAsync));
         Add("End session", () => _ = Guard(async () =>
         {
@@ -122,7 +142,7 @@ public partial class App : Application
     }
     private async Task HandleHotkeyAsync(int id)
     {
-        if (id == 3) { if (!capturing) tray.Show(); return; }
+        if (id == 3) { ShowRecent(); return; }
         if (capturing) return; capturing = true;
         try
         {
@@ -135,8 +155,11 @@ public partial class App : Application
                     var session = await shell.Store.GetOpenSessionAsync();
                     if (CaptureService.Unavailable(session) is { } unavailable) { ShowOutcome(unavailable); return; }
                     var context = services!.GetRequiredService<ForegroundWindowContextService>().Read();
-                    tray.Hide(); toast?.Close();
-                    var bytes = await services!.GetRequiredService<SnippingService>().SnipAsync(); if (bytes == null) return;
+                    tray.Hide(); panel.Hide(); toast?.Close();
+                    byte[]? bytes;
+                    try { bytes = await services!.GetRequiredService<SnippingService>().SnipAsync(); }
+                    finally { if (!shuttingDown) panel.SyncSession(); }
+                    if (bytes == null) return;
                     result = await shell.CapturesService.CaptureImageAsync(session!.Id, bytes, context.Source);
                 }
                 if (result.Item != null) await shell.RefreshAsync(); ShowOutcome(result);
@@ -162,7 +185,7 @@ public partial class App : Application
     private void Notify(string message, IEnumerable<(string Label, Action Run)> actions, bool essential = false)
     {
         if (!settings.NotificationsEnabled && !essential) return;
-        toast?.Close(); toast = new ToastWindow(message, actions); toast.Show();
+        toast?.Close(); toast = new ToastWindow(message, actions); PositionAbovePanel(toast); toast.Show();
     }
     private async Task Guard(Func<Task> work)
     {
@@ -202,10 +225,12 @@ public partial class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         shuttingDown = true; SystemEvents.UserPreferenceChanged -= OnUserPreferences;
+        openListener?.Unregister(null); openRequested?.Dispose();
         toast?.Close(); hotkeys?.Dispose();
         if (icon != null) { icon.Visible = false; icon.ContextMenuStrip?.Dispose(); icon.Dispose(); }
         stateIcon?.Dispose();
         if (tray != null) { tray.AllowClose = true; tray.Close(); }
+        if (panel != null) { panel.AllowClose = true; panel.Close(); }
         if (main != null) { main.AllowClose = true; main.Close(); }
         services?.GetService<ILocalLog>()?.Event("application.stopped"); services?.Dispose();
         if (ownsMutex) singleInstance?.ReleaseMutex(); singleInstance?.Dispose(); base.OnExit(e);

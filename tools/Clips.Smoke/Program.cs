@@ -46,6 +46,7 @@ public static class Program
                 await captures.CaptureTextAsync(); var bytes = DemoPng(); var imageCapture = (await captures.CaptureImageAsync(session.Id, bytes, new("Demo app", "A captured figure"))).Item!;
                 await shell.RefreshAsync(notebook.Id); await Render(main, output, "notebook");
                 await VerifyNoteSaving(main, shell, paths, notebook.Id, output);
+                await VerifySessionPanel(main, shell, output);
                 using (var hotkeys = new GlobalHotkeyService()) hotkeys.Apply(new(), false);
                 var tray = new CaptureTray(shell, () => main.Show());
                 tray.Show(); await Render(tray, output, "capture-tray");
@@ -72,7 +73,7 @@ public static class Program
                 main.AllowClose = true; main.Close();
                 await captures.UndoAsync(imageCapture);
                 if (File.Exists(images.Resolve(imageCapture.ImageRelativePath!))) throw new InvalidOperationException("Image deletion failed.");
-                await File.WriteAllTextAsync(Path.Combine(output, "result.txt"), $"WPF views constructed and rendered: 6\nBinding errors: {errors.Count}\nSQLite: text/image captures persisted\nImage Undo after rendering: passed\nIsolated test data: removed on exit\n");
+                await File.WriteAllTextAsync(Path.Combine(output, "result.txt"), $"WPF views constructed and rendered: 7\nBinding errors: {errors.Count}\nSQLite: text/image captures persisted\nImage Undo after rendering: passed\nIsolated test data: removed on exit\n");
                 code = errors.Count == 0 ? 0 : 1;
             }
             catch (Exception ex) { await File.WriteAllTextAsync(Path.Combine(output, "failure.txt"), ex.ToString()); }
@@ -86,6 +87,35 @@ public static class Program
         var rendered = new RenderTargetBitmap((int)window.ActualWidth, (int)window.ActualHeight, 96, 96, PixelFormats.Pbgra32); rendered.Render(window);
         var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(rendered));
         await using var file = File.Create(Path.Combine(output, name + ".png")); encoder.Save(file);
+    }
+    private static async Task VerifySessionPanel(MainWindow main, ShellViewModel shell, string output)
+    {
+        var recentOpened = false;
+        var panel = new SessionPanel(shell, () => recentOpened = true, () => { main.Show(); main.Activate(); });
+        shell.StateChanged += panel.SyncSession;
+        try
+        {
+            main.Activate(); var foreground = GetForegroundWindow();
+            panel.SyncSession(); await Task.Delay(100);
+            if (!panel.IsVisible || !panel.Topmost || panel.ShowInTaskbar || panel.ShowActivated || GetForegroundWindow() != foreground)
+                throw new InvalidOperationException("The floating panel is hidden or steals foreground focus.");
+            await Render(panel, output, "session-panel");
+            ((IInvokeProvider)new ButtonAutomationPeer((Button)panel.FindName("RecentButton")).GetPattern(PatternInterface.Invoke)).Invoke();
+            await Task.Delay(100);
+            if (!recentOpened) throw new InvalidOperationException("Recent captures action did not run.");
+            main.Hide();
+            ((IInvokeProvider)new ButtonAutomationPeer((Button)panel.FindName("NotebookButton")).GetPattern(PatternInterface.Invoke)).Invoke();
+            await Task.Delay(100);
+            if (!main.IsVisible) throw new InvalidOperationException("Open notebook did not restore the main UI.");
+            await shell.TogglePauseAsync();
+            if (!panel.IsVisible || shell.TrayState != "Paused") throw new InvalidOperationException("Paused session lost its panel.");
+            await shell.TogglePauseAsync(); await shell.EndAsync();
+            if (panel.IsVisible) throw new InvalidOperationException("Ended session retained its floating panel.");
+            await shell.StartCommand.ExecuteAsync(null);
+            if (!panel.IsVisible || shell.TrayState != "Active") throw new InvalidOperationException("Starting another session did not restore the panel.");
+            await File.WriteAllTextAsync(Path.Combine(output, "session-panel-result.txt"), "Panel visible, topmost, hidden from taskbar: passed\nPanel opening preserves foreground focus: passed\nBoth template buttons invoke their actions: passed\nPause, end, and restart visibility: passed\n");
+        }
+        finally { shell.StateChanged -= panel.SyncSession; panel.AllowClose = true; panel.Close(); }
     }
     private static async Task VerifyNoteSaving(MainWindow main, ShellViewModel shell, AppPaths paths, Guid notebookId, string output)
     {
@@ -182,6 +212,7 @@ public static class Program
         public Task<SelectionResult> ReadAsync() => Task.FromResult(new SelectionResult(SelectionStatus.Success, "The best observations start with noticing.\n\nKeep the source close, and add your own thought when it matters.", new("notepad", "Reading notes — demo")));
     }
     [DllImport("user32.dll")] private static extern int GetWindowLong(nint handle, int index);
+    [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
     [DllImport("user32.dll")] private static extern int SetWindowLong(nint handle, int index, int value);
     private sealed class SmokeLog : ILocalLog { public void Event(string eventName, int? errorCode = null) { } }
     private sealed class ProbeLog(string folder) : ILocalLog

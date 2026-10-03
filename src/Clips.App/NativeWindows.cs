@@ -8,6 +8,10 @@ namespace Clips.App;
 
 public static class NativeWindows
 {
+    // A newly launched process can grant the running instance permission to bring
+    // its notebook forward before signalling it. Windows otherwise blocks activation.
+    public static void AllowExistingInstanceActivation() => AllowSetForegroundWindow(-1);
+    [DllImport("user32.dll")] private static extern bool AllowSetForegroundWindow(int processId);
     public static void NonActivating(Window window, bool clickActivates)
     {
         window.ShowActivated = false;
