@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net8.0-windows10.0.18362.0</TargetFramework><UseWPF>true</UseWPF><UseWindowsForms>true</UseWindowsForms></PropertyGroup>
+  <ItemGroup><ProjectReference Include="../Clips.Core/Clips.Core.csproj"/><PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.11"/></ItemGroup>
+  <ItemGroup><EmbeddedResource Include="Migrations/*.sql"/></ItemGroup>
+</Project>

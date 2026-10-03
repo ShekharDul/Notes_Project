@@ -1,0 +1,42 @@
+<Window x:Class="Clips.App.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Width="1120" Height="780" MinWidth="820" MinHeight="560" Title="{Binding AppName}">
+ <Grid>
+  <Grid.ColumnDefinitions><ColumnDefinition Width="260"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+  <Border BorderBrush="{DynamicResource Line}" BorderThickness="0,0,1,0" Background="{DynamicResource Card}">
+   <DockPanel Margin="16,22">
+    <StackPanel DockPanel.Dock="Top"><TextBlock Text="{Binding AppName}" FontSize="26" FontWeight="SemiBold" Margin="10,0,0,22"/><Button Content="＋ New notebook" Command="{Binding NewNotebookCommand}" Style="{StaticResource Primary}"/></StackPanel>
+    <StackPanel DockPanel.Dock="Bottom"><TextBlock Text="Local. Quiet. Yours." Foreground="{DynamicResource Muted}" Margin="10,16"/><Button Content="{Binding ArchiveLabel}" Command="{Binding ToggleArchiveCommand}"/><Button Content="Settings" Command="{Binding SettingsCommand}"/></StackPanel>
+    <ListBox ItemsSource="{Binding Notebooks}" SelectedItem="{Binding SelectedNotebook}" Margin="0,20,0,0" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+     <ListBox.ItemContainerStyle><Style TargetType="ListBoxItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="0"/><Setter Property="Margin" Value="0,3"/></Style></ListBox.ItemContainerStyle>
+     <ListBox.ItemTemplate><DataTemplate><Border Padding="10,12" CornerRadius="7" BorderThickness="0,0,0,1" BorderBrush="{DynamicResource Line}"><StackPanel><StackPanel Orientation="Horizontal"><Border Background="{Binding Color}" CornerRadius="5" Width="32" Height="32" Margin="0,0,10,0"><TextBlock Text="{Binding Icon}" VerticalAlignment="Center" HorizontalAlignment="Center"/></Border><TextBlock Text="{Binding Name}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Width="150" FontWeight="SemiBold"/></StackPanel><TextBlock Text="{Binding Subtitle}" Foreground="{DynamicResource Muted}" FontSize="11" Margin="0,8,0,0"/><TextBlock Text="{Binding Badge}" FontSize="11" Margin="0,4,0,0"/></StackPanel></Border></DataTemplate></ListBox.ItemTemplate>
+    </ListBox>
+   </DockPanel>
+  </Border>
+  <Grid Grid.Column="1" Margin="32,24">
+   <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+   <TextBlock Text="{Binding Error}" Foreground="{DynamicResource Ink}" TextWrapping="Wrap" Margin="0,0,0,14" AutomationProperties.LiveSetting="Polite"/>
+   <StackPanel Grid.Row="1" VerticalAlignment="Center" MaxWidth="480" Visibility="{Binding IsEmpty,Converter={StaticResource BoolVisibility}}">
+    <TextBlock Text="Your ideas, kept close." FontSize="32" FontWeight="SemiBold"/><TextBlock Text="Start a notebook, then capture text and screenshots while you work." TextWrapping="Wrap" FontSize="17" Foreground="{DynamicResource Muted}" Margin="0,18,0,24"/>
+    <Button Content="Create your first notebook" Command="{Binding NewNotebookCommand}" Style="{StaticResource Primary}" HorizontalAlignment="Left"/><TextBlock Text="Captures are stored locally on this device." Foreground="{DynamicResource Muted}" Margin="0,18"/>
+   </StackPanel>
+   <DockPanel Grid.Row="1" Visibility="{Binding HasNotebook,Converter={StaticResource BoolVisibility}}">
+    <StackPanel DockPanel.Dock="Top">
+     <StackPanel Orientation="Horizontal"><Border Background="{Binding Cover}" Width="52" Height="52" CornerRadius="12" Margin="0,0,16,0"><TextBlock Text="{Binding Icon}" FontSize="26" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><StackPanel><TextBlock Text="{Binding Title}" FontSize="27" FontWeight="SemiBold" TextWrapping="Wrap"/><TextBlock Text="{Binding CountLabel}" Foreground="{DynamicResource Muted}" Margin="0,5,0,0"/></StackPanel></StackPanel>
+     <WrapPanel Margin="0,20,0,0"><Button Content="Start session" Style="{StaticResource Primary}" Command="{Binding StartCommand}" Visibility="{Binding CanStart,Converter={StaticResource BoolVisibility}}"/><Button Content="{Binding PauseLabel}" Command="{Binding PauseCommand}" Visibility="{Binding CanManageSession,Converter={StaticResource BoolVisibility}}"/><Button Content="End session" Command="{Binding EndCommand}" Visibility="{Binding CanManageSession,Converter={StaticResource BoolVisibility}}"/><TextBlock Text="{Binding SessionLabel}" VerticalAlignment="Center" Margin="12,0" Foreground="{DynamicResource Muted}"/></WrapPanel>
+     <WrapPanel Margin="0,8,0,18"><Button Content="Edit name / cover / icon" Command="{Binding EditNotebookCommand}"/><Button Content="Archive / Restore" Command="{Binding ArchiveCommand}"/><Button Content="Delete notebook" Command="{Binding DeleteNotebookCommand}"/></WrapPanel>
+     <TextBlock Text="Start a session to collect text and screenshots. Your captures will appear here." Visibility="{Binding NoCaptures,Converter={StaticResource BoolVisibility}}" Foreground="{DynamicResource Muted}" TextWrapping="Wrap" Margin="0,20"/>
+    </StackPanel>
+    <ListBox x:Name="Timeline" ItemsSource="{Binding Captures}" SelectedItem="{Binding SelectedCapture}" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+     <ListBox.ItemContainerStyle><Style TargetType="ListBoxItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="1"/><Setter Property="Margin" Value="0,0,0,16"/></Style></ListBox.ItemContainerStyle>
+     <ListBox.ItemTemplate><DataTemplate><Border Background="{DynamicResource Card}" BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="10" Padding="22"><StackPanel>
+      <DockPanel><TextBlock Text="{Binding Number}" FontWeight="SemiBold" DockPanel.Dock="Right"/><TextBlock Text="{Binding Caption}" Foreground="{DynamicResource Muted}" FontSize="12"/></DockPanel><TextBlock Text="{Binding SourceTitle}" TextWrapping="Wrap" Foreground="{DynamicResource Muted}" FontSize="12" Margin="0,4,0,16"/>
+      <Border BorderBrush="{DynamicResource Accent}" BorderThickness="3,0,0,0" Padding="15,2" Visibility="{Binding IsText,Converter={StaticResource BoolVisibility}}"><TextBlock Text="{Binding Text}" TextWrapping="Wrap" FontSize="16" LineHeight="25"/></Border>
+      <Button Command="{Binding ExpandCommand}" Visibility="{Binding IsImage,Converter={StaticResource BoolVisibility}}" ToolTip="Expand screenshot" Padding="0"><Image Source="{Binding PreviewImage}" MaxHeight="300" Stretch="Uniform"/></Button>
+      <TextBlock Text="Attached note" FontWeight="SemiBold" FontSize="12" Margin="0,20,0,5"/><TextBox Text="{Binding Note,UpdateSourceTrigger=PropertyChanged}" MaxLength="10000" AcceptsReturn="True" MinHeight="64" MaxHeight="230" VerticalScrollBarVisibility="Auto" TextWrapping="Wrap" AutomationProperties.Name="Attached note"/>
+      <TextBlock Text="{Binding NoteStatus}" FontSize="11" Foreground="{DynamicResource Muted}" Margin="3,4"/>
+      <WrapPanel><Button Content="Save note" Command="{Binding SaveNoteCommand}"/><Button Content="↑ Move up" Command="{Binding MoveUpCommand}"/><Button Content="↓ Move down" Command="{Binding MoveDownCommand}"/><Button Content="Delete" Command="{Binding DeleteCommand}"/></WrapPanel>
+     </StackPanel></Border></DataTemplate></ListBox.ItemTemplate>
+    </ListBox>
+   </DockPanel>
+  </Grid>
+ </Grid>
+</Window>

@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>WinExe</OutputType><TargetFramework>net8.0-windows10.0.18362.0</TargetFramework><UseWPF>true</UseWPF><UseWindowsForms>true</UseWindowsForms><ApplicationManifest>app.manifest</ApplicationManifest><NoWarn>$(NoWarn);WFAC010</NoWarn></PropertyGroup>
+  <!-- WPF owns the entry point and DPI awareness; Forms is used only for NotifyIcon. -->
+  <ItemGroup><ProjectReference Include="../Clips.Core/Clips.Core.csproj"/><ProjectReference Include="../Clips.Infrastructure/Clips.Infrastructure.csproj"/><PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0"/><PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1"/></ItemGroup>
+</Project>

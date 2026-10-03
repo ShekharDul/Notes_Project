@@ -1,0 +1,25 @@
+# Implementation report
+
+## Implemented
+
+Native .NET 8/WPF solution with the requested Core/Infrastructure/App/Tests boundaries, CommunityToolkit.Mvvm commands, Microsoft DI, raw parameterized SQLite and an embedded versioned migration. Display/storage branding is isolated in `Product`.
+
+The implemented loop includes notebook creation/editing/archiving/deletion, a single restorable Active/Paused session, explicit UI Automation text capture, primary-display rectangular PNG capture, tray retreat and session controls, non-activating confirmations with targeted Undo/Open, compact latest-five review, attached notes with explicit saves, full timeline ordering and persistence, image expansion, shortcut conflict settings, and System/Light/Dark/high-contrast resource handling.
+
+Storage uses immediate transactional appends, deterministic reorder/delete compaction, image compensation on failed persistence, temporary/orphan recovery, and content-free rolling logs. A Windows x64 self-contained single executable is generated under `artifacts/Clips-win-x64/`.
+
+## Verification and remaining release gates
+
+Release build passes with zero warnings/errors. All 27 xUnit cases pass. The WPF runtime smoke constructs/renders six views with zero binding errors and verifies that a displayed image can be undone without retaining a file lock. This check uses fabricated content, not a real selection or screen grab.
+
+The README’s interactive checklist is still a release gate. Real Notepad selection, overlay input/cancellation, non-activation under source-app focus, Windows 10 support, display scaling, and high-contrast keyboard navigation must be tested on actual target desktop configurations. These are not claimed as manually verified.
+
+## Deferred scope and limitations
+
+Multi-monitor snipping, native acrylic blur, tray geometry persistence, an exclusion-list settings editor, signed installer/update delivery, and ARM64/x86 verification are deferred to keep this first loop small. Primary-display snipping is intentional; accessible selection remains dependent on each source app’s UI Automation provider. Standard Windows controls/title bars retain some OS styling. Data is local and unencrypted; cancelled screen buffers are released through normal managed-memory lifetime.
+
+AI, accounts, sync, collaboration, telemetry, URL extraction, OCR, document editing/annotation, tags, folders, export, search, drag-and-drop, clipboard history, passive selection capture, and screen recording remain excluded as requested.
+
+## Exact next feature
+
+**Multi-monitor region snipping with mixed-DPI correctness.** Extend the snapshot service’s display descriptors to enumerate monitors, show one appropriately scaled overlay per display, and translate selected logical bounds to physical pixels. Keep the explicit one-shot privacy model. Validate negative display coordinates and 100%/150% mixed-DPI arrangements before shipping it. Complete the existing MVP manual QA gates before adding this feature.
