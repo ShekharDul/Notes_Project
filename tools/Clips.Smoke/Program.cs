@@ -90,32 +90,112 @@ public static class Program
     }
     private static async Task VerifySessionPanel(MainWindow main, ShellViewModel shell, string output)
     {
-        var recentOpened = false;
-        var panel = new SessionPanel(shell, () => recentOpened = true, () => { main.Show(); main.Activate(); });
-        shell.StateChanged += panel.SyncSession;
+        using var companion = new CaptureCompanion(shell, main, () => { main.Show(); main.Activate(); });
+        var panel = companion.Panel; var tray = companion.Tray;
+        var reader = new Window { Title = "Synthetic reading window", Width = 400, Height = 200, Content = new TextBlock { Text = "Continue reading here", Margin = new Thickness(20) } };
         try
         {
-            main.Activate(); var foreground = GetForegroundWindow();
-            panel.SyncSession(); await Task.Delay(100);
+            companion.SyncSession();
+            if (panel.IsVisible || tray.IsVisible) throw new InvalidOperationException("The companion competes with the main UI.");
+            main.Hide(); reader.Show(); reader.Activate(); panel.Hide();
+            var foreground = GetForegroundWindow(); companion.SyncSession(); await Task.Delay(100);
             if (!panel.IsVisible || !panel.Topmost || panel.ShowInTaskbar || panel.ShowActivated || GetForegroundWindow() != foreground)
                 throw new InvalidOperationException("The floating panel is hidden or steals foreground focus.");
+            shell.Feedback.Show("Saved ✓", "Undo", () => Task.FromResult<string?>("Capture removed"));
             await Render(panel, output, "session-panel");
             ((IInvokeProvider)new ButtonAutomationPeer((Button)panel.FindName("RecentButton")).GetPattern(PatternInterface.Invoke)).Invoke();
             await Task.Delay(100);
-            if (!recentOpened) throw new InvalidOperationException("Recent captures action did not run.");
-            main.Hide();
+            if (panel.IsVisible || !tray.IsVisible || main.IsVisible || GetForegroundWindow() != foreground)
+                throw new InvalidOperationException("Expanded review competes with the panel/main UI or steals focus.");
+            await Render(tray, output, "expanded-companion");
+            var draft = shell.Recent.First(); draft.Note = "Draft survives companion switching";
+            companion.Suspend();
+            if (panel.IsVisible || tray.IsVisible) throw new InvalidOperationException("Screenshot suspension left a companion visible.");
+            companion.Resume();
+            if (!tray.IsVisible || panel.IsVisible) throw new InvalidOperationException("Screenshot cancellation did not restore expanded review.");
+            ((IInvokeProvider)new ButtonAutomationPeer((Button)tray.FindName("CollapseButton")).GetPattern(PatternInterface.Invoke)).Invoke();
+            await Task.Delay(100);
+            if (!panel.IsVisible || tray.IsVisible || draft.Note != "Draft survives companion switching")
+                throw new InvalidOperationException("Collapsing review lost its draft or left two surfaces visible.");
             ((IInvokeProvider)new ButtonAutomationPeer((Button)panel.FindName("NotebookButton")).GetPattern(PatternInterface.Invoke)).Invoke();
             await Task.Delay(100);
-            if (!main.IsVisible) throw new InvalidOperationException("Open notebook did not restore the main UI.");
+            if (!main.IsVisible || panel.IsVisible || tray.IsVisible) throw new InvalidOperationException("Open notebook did not replace the companion.");
+            main.Hide();
             await shell.TogglePauseAsync();
             if (!panel.IsVisible || shell.TrayState != "Paused") throw new InvalidOperationException("Paused session lost its panel.");
-            await shell.TogglePauseAsync(); await shell.EndAsync();
-            if (panel.IsVisible) throw new InvalidOperationException("Ended session retained its floating panel.");
+            await shell.TogglePauseAsync();
+            var notebookId = shell.Session!.NotebookId; var recentIds = shell.Recent.Select(c => c.Item.Id).ToArray();
+            ((IInvokeProvider)new ButtonAutomationPeer((Button)panel.FindName("EndSessionButton")).GetPattern(PatternInterface.Invoke)).Invoke();
+            await Task.Delay(100);
+            if (shell.EndCommand.ExecutionTask is { } endTask) await endTask;
+            if (!panel.IsVisible || tray.IsVisible || main.IsVisible || shell.HasOpenSession || shell.TrayState != "Session ended")
+                throw new InvalidOperationException("End session closed the panel, opened the main UI, or left capturing enabled.");
+            if (!recentIds.SequenceEqual(shell.Recent.Select(c => c.Item.Id)) || draft.Note != "Draft survives companion switching")
+                throw new InvalidOperationException("Ending the session lost recent captures or unsaved notes.");
+            if ((await shell.CapturesService.CaptureTextAsync()).Item != null)
+                throw new InvalidOperationException("Capturing continued after ending the session.");
+            companion.ShowRecent();
+            if (!tray.IsVisible || panel.IsVisible || ((Button)tray.FindName("EndSessionButton")).IsEnabled)
+                throw new InvalidOperationException("Ended-session review is unavailable or permits another End action.");
+            draft.Note = "Note saved after session ended";
+            await draft.SaveNoteCommand.ExecuteAsync(null);
+            if ((await shell.Store.GetCapturesAsync(notebookId)).Single(c => c.Id == draft.Item.Id).UserNote != draft.Note)
+                throw new InvalidOperationException("The user cannot save notes after ending a session.");
+            await Render(tray, output, "ended-session-review"); companion.Collapse();
+            var quitRequests = 0; void QuitRequested() => quitRequests++;
+            shell.QuitRequested += QuitRequested;
+            try
+            {
+                ((IInvokeProvider)new ButtonAutomationPeer((Button)panel.FindName("QuitButton")).GetPattern(PatternInterface.Invoke)).Invoke();
+                await Task.Delay(100); companion.ShowRecent();
+                ((IInvokeProvider)new ButtonAutomationPeer((Button)tray.FindName("QuitButton")).GetPattern(PatternInterface.Invoke)).Invoke();
+                await Task.Delay(100);
+                if (quitRequests != 2) throw new InvalidOperationException("Quit Clips is not reachable in both companion modes.");
+            }
+            finally { shell.QuitRequested -= QuitRequested; }
+            companion.Collapse();
+            await Render(panel, output, "ended-session-panel");
             await shell.StartCommand.ExecuteAsync(null);
             if (!panel.IsVisible || shell.TrayState != "Active") throw new InvalidOperationException("Starting another session did not restore the panel.");
-            await File.WriteAllTextAsync(Path.Combine(output, "session-panel-result.txt"), "Panel visible, topmost, hidden from taskbar: passed\nPanel opening preserves foreground focus: passed\nBoth template buttons invoke their actions: passed\nPause, end, and restart visibility: passed\n");
+            companion.ShowRecent();
+            ((IInvokeProvider)new ButtonAutomationPeer((Button)tray.FindName("EndSessionButton")).GetPattern(PatternInterface.Invoke)).Invoke();
+            await Task.Delay(100);
+            if (shell.EndCommand.ExecutionTask is { } expandedEnd) await expandedEnd;
+            if (!tray.IsVisible || panel.IsVisible || main.IsVisible || shell.HasOpenSession)
+                throw new InvalidOperationException("Ending from expanded review changed the companion mode.");
+            companion.Collapse(); await shell.StartCommand.ExecuteAsync(null);
+            draft.Note = ""; await draft.SaveNoteCommand.ExecuteAsync(null);
+            await VerifyFeedback(shell);
+            await File.WriteAllTextAsync(Path.Combine(output, "session-panel-result.txt"), "Only one of main/compact/expanded UI is visible: passed\nCompact and expanded opening preserve source focus: passed\nRecent/Collapse/Open notebook buttons: passed\nScreenshot suspension restores prior mode: passed\nUnsaved drafts survive mode switches and ending: passed\nEnd buttons keep both modes available and stop capture: passed\nNotes save after ending the session: passed\nQuit buttons request app shutdown from both modes: passed\nPause, end, and restart visibility: passed\nTargeted Undo and newer-capture race: passed\nFailed action retry and confirmation expiry: passed\n");
         }
-        finally { shell.StateChanged -= panel.SyncSession; panel.AllowClose = true; panel.Close(); }
+        finally { reader.Close(); main.Show(); }
+    }
+    private static async Task VerifyFeedback(ShellViewModel shell)
+    {
+        var first = (await shell.CapturesService.CaptureTextAsync()).Item!;
+        await shell.RefreshAsync();
+        shell.Feedback.Show("Saved first", "Undo", async () =>
+        {
+            await shell.CapturesService.UndoAsync(first); shell.ForgetCapture(first.Id); await shell.RefreshAsync(); return "Capture removed";
+        });
+        await shell.Feedback.ActionCommand.ExecuteAsync(null);
+        if ((await shell.Store.GetCapturesAsync(first.NotebookId)).Any(c => c.Id == first.Id)) throw new InvalidOperationException("Companion Undo did not remove the target capture.");
+        var pending = new TaskCompletionSource<string?>();
+        shell.Feedback.Show("Older confirmation", "Undo", () => pending.Task);
+        var running = shell.Feedback.ActionCommand.ExecuteAsync(null);
+        shell.Feedback.Show("Saved newer", "Undo", () => Task.FromResult<string?>("Newer capture removed"));
+        pending.SetResult("Older capture removed"); await running;
+        if (shell.Feedback.Message != "Saved newer" || !shell.Feedback.HasAction) throw new InvalidOperationException("An older Undo completion overwrote the newer confirmation.");
+        var attempts = 0;
+        shell.Feedback.Show("Saved retry", "Undo", () => ++attempts == 1 ? Task.FromException<string?>(new IOException("Injected failure")) : Task.FromResult<string?>("Capture removed"));
+        await shell.Feedback.ActionCommand.ExecuteAsync(null);
+        if (!shell.Feedback.HasAction || !shell.Feedback.Message.Contains("Try again")) throw new InvalidOperationException("Failed Undo lost its retry action.");
+        await shell.Feedback.ActionCommand.ExecuteAsync(null);
+        if (shell.Feedback.Message != "Capture removed") throw new InvalidOperationException("Companion Undo retry failed.");
+        shell.Feedback.Show("Saved ✓", "Undo", () => Task.FromResult<string?>("Capture removed"));
+        await Task.Delay(6500);
+        if (shell.Feedback.HasAction || shell.Feedback.Message != "Ready to capture") throw new InvalidOperationException("Temporary confirmation did not expire.");
+        shell.Error = "";
     }
     private static async Task VerifyNoteSaving(MainWindow main, ShellViewModel shell, AppPaths paths, Guid notebookId, string output)
     {

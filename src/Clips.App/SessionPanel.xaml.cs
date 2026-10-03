@@ -16,10 +16,6 @@ public partial class SessionPanel : Window
         NativeWindows.NonActivating(this, false); NativeWindows.PlaceBottomRight(this);
         Closing += (_, e) => { if (!AllowClose) e.Cancel = true; };
     }
-    public void SyncSession()
-    {
-        if (((ShellViewModel)DataContext).Session != null) Show(); else Hide();
-    }
     private void ShowRecent(object sender, RoutedEventArgs e) => recent();
     private void ShowNotebook(object sender, RoutedEventArgs e) => notebook();
     private void DragPanel(object sender, MouseButtonEventArgs e)

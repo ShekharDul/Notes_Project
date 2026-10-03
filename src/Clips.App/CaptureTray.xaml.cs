@@ -7,14 +7,17 @@ namespace Clips.App;
 public partial class CaptureTray : Window
 {
     private readonly Action open;
+    private readonly Action collapse;
     public bool AllowClose { get; set; }
-    public CaptureTray(ShellViewModel vm, Action open)
+    public CaptureTray(ShellViewModel vm, Action open, Action? collapse = null)
     {
         InitializeComponent(); Style = (Style)Application.Current.FindResource(typeof(Window)); DataContext = vm; this.open = open; NativeWindows.NonActivating(this, true); NativeWindows.PlaceBottomRight(this);
-        Closing += (_, e) => { if (!AllowClose) { e.Cancel = true; Hide(); } };
+        this.collapse = collapse ?? Hide;
+        Closing += (_, e) => { if (!AllowClose) { e.Cancel = true; this.collapse(); } };
     }
     private void OpenNotebook(object sender, RoutedEventArgs e) => open();
-    private void HideTray(object sender, RoutedEventArgs e) => Hide();
+    private void HideTray(object sender, RoutedEventArgs e) => collapse();
+    public void ShowLatest() => RecentScroll.ScrollToTop();
     private void NoteExpanded(object sender, RoutedEventArgs e)
     {
         if (sender is not Expander { Content: StackPanel panel } || e.Source != sender) return;

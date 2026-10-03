@@ -107,6 +107,7 @@ public partial class ShellViewModel : ObservableObject
 {
     public INotebookStore Store { get; }
     public CaptureService CapturesService { get; }
+    public CompanionFeedback Feedback { get; }
     private readonly NotebookService notebooksService;
     private readonly IImageStorage images;
     private readonly ILocalLog log;
@@ -117,6 +118,7 @@ public partial class ShellViewModel : ObservableObject
     public event Action? SessionStarted;
     public event Action<int>? SessionEnded;
     public event Action? SettingsRequested;
+    public event Action? QuitRequested;
     public event Action<CaptureViewModel>? CaptureOpened;
     public ObservableCollection<NotebookRow> Notebooks { get; } = [];
     public ObservableCollection<CaptureViewModel> Captures { get; } = [];
@@ -129,6 +131,8 @@ public partial class ShellViewModel : ObservableObject
     private bool refreshing;
     public CaptureSession? Session { get; private set; }
     public Notebook? SessionNotebook { get; private set; }
+    public Notebook? ReviewNotebook { get; private set; }
+    public bool HasOpenSession => Session != null;
     public bool HasNotebook => SelectedNotebook != null;
     public bool IsEmpty => SelectedNotebook == null;
     public bool NoCaptures => HasNotebook && Captures.Count == 0;
@@ -137,10 +141,10 @@ public partial class ShellViewModel : ObservableObject
     public string Cover => SelectedNotebook?.Color ?? Product.CoverColors[0];
     public string CountLabel => $"{Captures.Count} captures · stored on this device";
     public string SessionLabel => Session is { } current && current.NotebookId == SelectedNotebook?.Model.Id ? $"● {current.Status}" : "No session in this notebook";
-    public string TrayLabel => SessionNotebook?.Name ?? "No active notebook";
-    public string TrayState => Session?.Status.ToString() ?? "No active session";
+    public string TrayLabel => (SessionNotebook ?? ReviewNotebook)?.Name ?? Product.Name;
+    public string TrayState => Session?.Status.ToString() ?? (ReviewNotebook != null ? "Session ended" : "Idle");
     public string TrayColor => SessionNotebook?.CoverColor ?? "#808080";
-    public string PauseLabel => Session?.Status == SessionStatus.Paused ? "Resume capture" : "Pause capture";
+    public string PauseLabel => Session?.Status == SessionStatus.Paused ? "Resume session" : "Pause session";
     public bool CanStart => SelectedNotebook is { Model.IsArchived: false } && Session?.NotebookId != SelectedNotebook.Model.Id;
     public bool CanManageSession => Session != null && Session.NotebookId == SelectedNotebook?.Model.Id;
     public string ArchiveLabel => ShowArchived ? "Show notebooks" : "Archived notebooks";
@@ -153,9 +157,16 @@ public partial class ShellViewModel : ObservableObject
     public IAsyncRelayCommand EndCommand { get; }
     public IAsyncRelayCommand ToggleArchiveCommand { get; }
     public IRelayCommand SettingsCommand { get; }
+    public IRelayCommand QuitCommand { get; }
     public ShellViewModel(INotebookStore store, CaptureService captures, NotebookService notebooks, IImageStorage images, ILocalLog log)
     {
         Store = store; CapturesService = captures; notebooksService = notebooks; this.images = images; this.log = log;
+        Feedback = new CompanionFeedback(ReportFailure, () => Session?.Status switch
+        {
+            SessionStatus.Active => "Ready to capture", SessionStatus.Paused => "Session paused",
+            _ => "Capture is off · notes stay available"
+        });
+        Feedback.Clear();
         NewNotebookCommand = new AsyncRelayCommand(() => Safe(async () =>
         {
             var result = Dialogs.EditNotebook(null); if (result == null) return;
@@ -180,12 +191,10 @@ public partial class ShellViewModel : ObservableObject
         }));
         StartCommand = new AsyncRelayCommand(() => Safe(StartAsync));
         PauseCommand = new AsyncRelayCommand(() => Safe(TogglePauseAsync));
-        EndCommand = new AsyncRelayCommand(() => Safe(async () =>
-        {
-            if (Dialogs.Confirm("End this capture session?", "Your notebook and saved captures will remain available.", "End session")) await EndAsync();
-        }));
+        EndCommand = new AsyncRelayCommand(() => Safe(EndAsync));
         ToggleArchiveCommand = new AsyncRelayCommand(() => Safe(async () => { ShowArchived = !ShowArchived; await RefreshAsync(); }));
         SettingsCommand = new RelayCommand(() => SettingsRequested?.Invoke());
+        QuitCommand = new RelayCommand(() => QuitRequested?.Invoke());
     }
     partial void OnSelectedNotebookChanged(NotebookRow? value)
     {
@@ -209,6 +218,9 @@ public partial class ShellViewModel : ObservableObject
         Session = await Store.GetOpenSessionAsync();
         var available = await Store.GetNotebooksAsync();
         SessionNotebook = available.FirstOrDefault(n => n.Id == Session?.NotebookId);
+        ReviewNotebook = SessionNotebook ?? (ReviewNotebook == null ? null :
+            available.FirstOrDefault(n => n.Id == ReviewNotebook.Id) ??
+            (await Store.GetNotebooksAsync(true)).FirstOrDefault(n => n.Id == ReviewNotebook.Id));
         var list = ShowArchived ? await Store.GetNotebooksAsync(true) : available;
         var id = selectId ?? SelectedNotebook?.Model.Id;
         var rows = new List<NotebookRow>(); foreach (var n in list) rows.Add(new(n, (await Store.GetCapturesAsync(n.Id)).Count, n.Id == Session?.NotebookId));
@@ -217,8 +229,8 @@ public partial class ShellViewModel : ObservableObject
         finally { refreshing = false; }
         await LoadCapturesAsync();
         Recent.Clear();
-        if (Session != null)
-            foreach (var item in (await Store.GetCapturesAsync(Session.NotebookId)).OrderBy(i => i.CapturedAtUtc).ThenBy(i => i.DisplayOrder).TakeLast(5))
+        if (ReviewNotebook != null)
+            foreach (var item in (await Store.GetCapturesAsync(ReviewNotebook.Id)).OrderByDescending(i => i.CapturedAtUtc).ThenByDescending(i => i.DisplayOrder).Take(5))
                 Recent.Add(CaptureVm(item));
         NotifyState();
         }
@@ -244,7 +256,7 @@ public partial class ShellViewModel : ObservableObject
     }
     private void NotifyState()
     {
-        foreach (var name in new[] { nameof(HasNotebook), nameof(IsEmpty), nameof(NoCaptures), nameof(Title), nameof(Icon), nameof(Cover), nameof(CountLabel), nameof(SessionLabel), nameof(TrayLabel), nameof(TrayState), nameof(TrayColor), nameof(PauseLabel), nameof(CanStart), nameof(CanManageSession), nameof(ArchiveLabel) }) OnPropertyChanged(name);
+        foreach (var name in new[] { nameof(HasNotebook), nameof(IsEmpty), nameof(NoCaptures), nameof(CountLabel), nameof(Title), nameof(Icon), nameof(Cover), nameof(SessionLabel), nameof(TrayLabel), nameof(TrayState), nameof(TrayColor), nameof(PauseLabel), nameof(CanStart), nameof(CanManageSession), nameof(HasOpenSession), nameof(ArchiveLabel) }) OnPropertyChanged(name);
         StateChanged?.Invoke();
     }
     private async Task StartAsync()

@@ -15,6 +15,7 @@ public partial class App : Application
     private MainWindow main = null!;
     private CaptureTray tray = null!;
     private SessionPanel panel = null!;
+    private CaptureCompanion companion = null!;
     private GlobalHotkeyService hotkeys = null!;
     private AppSettings settings = new();
     private Forms.NotifyIcon? icon;
@@ -48,11 +49,16 @@ public partial class App : Application
             settings = await store.GetSettingsAsync(); ApplyTheme();
             shell = services.GetRequiredService<ShellViewModel>(); await shell.RefreshAsync();
             main = new MainWindow(shell); MainWindow = main;
-            tray = new CaptureTray(shell, () => _ = Guard(async () => { if (shell.Session != null) await shell.RefreshAsync(shell.Session.NotebookId); ShowMain(); }));
-            panel = new SessionPanel(shell, ShowRecent, ShowMain);
+            companion = new CaptureCompanion(shell, main, () => _ = Guard(async () =>
+            {
+                if (shell.ReviewNotebook is { } notebook) { shell.ShowArchived = notebook.IsArchived; await shell.RefreshAsync(notebook.Id); }
+                ShowMain();
+            }));
+            tray = companion.Tray; panel = companion.Panel;
             hotkeys = new GlobalHotkeyService(); hotkeys.Pressed += id => _ = HandleHotkeyAsync(id);
             shell.StateChanged += SyncSession; shell.SessionStarted += OnSessionStarted; shell.SettingsRequested += ShowSettings;
-            shell.SessionEnded += count => { ShowMain(); Notify($"Session ended. {count} captures saved.", []); };
+            shell.QuitRequested += () => _ = QuitAsync();
+            shell.SessionEnded += count => shell.Feedback.Show($"Session ended · {count} captures saved", transient: true);
             CreateSystemTray(); SyncSession();
             SystemEvents.UserPreferenceChanged += OnUserPreferences;
             DispatcherUnhandledException += (_, args) =>
@@ -76,7 +82,7 @@ public partial class App : Application
     private void ShowRecent()
     {
         if (capturing) return;
-        PositionAbovePanel(tray); tray.Show();
+        toast?.Close(); companion.ShowRecent();
     }
     private void PositionAbovePanel(Window window)
     {
@@ -95,14 +101,13 @@ public partial class App : Application
     }
     private void OnSessionStarted()
     {
-        main.Hide(); panel.SyncSession(); Notify($"Session started — saving to {shell.TrayLabel}.", []);
+        main.Hide(); companion.Collapse(); shell.Feedback.Show("Session started — ready to capture");
         if (hotkeyErrors.Count > 0) Notify(string.Join(" ", hotkeyErrors), [("Settings", ShowSettings)], true);
     }
     private void SyncSession()
     {
         if (shuttingDown) return;
-        panel.SyncSession();
-        if (shell.Session == null) tray.Hide();
+        companion.SyncSession();
         hotkeyErrors = hotkeys.Apply(settings, shell.Session?.Status == SessionStatus.Active);
         if (hotkeyErrors.Count > 0) shell.Error = string.Join("\n", hotkeyErrors);
         if (icon == null) return;
@@ -131,12 +136,8 @@ public partial class App : Application
         var menu = new Forms.ContextMenuStrip();
         void Add(string label, Action action) => menu.Items.Add(label, null, (_, _) => Dispatcher.InvokeAsync(action));
         Add("Open " + Product.Name, ShowMain); Add("Show capture tray", ShowRecent);
-        Add("Pause capture", () => _ = Guard(shell.TogglePauseAsync));
-        Add("End session", () => _ = Guard(async () =>
-        {
-            if (shell.Session == null || !Dialogs.Confirm("End this capture session?", "Your notebook and saved captures will remain available.", "End session")) return;
-            await shell.EndAsync();
-        }));
+        Add("Pause session", () => _ = Guard(shell.TogglePauseAsync));
+        Add("End session", () => _ = shell.EndCommand.ExecuteAsync(null));
         menu.Items.Add(new Forms.ToolStripSeparator()); Add("Quit", () => _ = QuitAsync());
         icon = new Forms.NotifyIcon { Visible = true, ContextMenuStrip = menu, Text = Product.Name }; icon.DoubleClick += (_, _) => Dispatcher.InvokeAsync(ShowMain);
     }
@@ -155,10 +156,10 @@ public partial class App : Application
                     var session = await shell.Store.GetOpenSessionAsync();
                     if (CaptureService.Unavailable(session) is { } unavailable) { ShowOutcome(unavailable); return; }
                     var context = services!.GetRequiredService<ForegroundWindowContextService>().Read();
-                    tray.Hide(); panel.Hide(); toast?.Close();
+                    companion.Suspend(); toast?.Close();
                     byte[]? bytes;
                     try { bytes = await services!.GetRequiredService<SnippingService>().SnipAsync(); }
-                    finally { if (!shuttingDown) panel.SyncSession(); }
+                    finally { if (!shuttingDown) companion.Resume(); }
                     if (bytes == null) return;
                     result = await shell.CapturesService.CaptureImageAsync(session!.Id, bytes, context.Source);
                 }
@@ -172,12 +173,21 @@ public partial class App : Application
         var actions = new List<(string, Action)>();
         if (outcome.Item is { } item)
         {
-            actions.Add(("Undo", () => _ = Guard(async () => { await shell.CapturesService.UndoAsync(item); shell.ForgetCapture(item.Id); await shell.RefreshAsync(); Notify("Capture removed.", []); })));
-            actions.Add(("Open", () => _ = Guard(async () => { await shell.OpenCaptureAsync(item); ShowMain(); })));
-            Notify($"{outcome.Message} to {shell.TrayLabel}", actions);
+            toast?.Close();
+            shell.Feedback.Show("Saved ✓", "Undo", async () =>
+            {
+                await shell.CapturesService.UndoAsync(item); shell.ForgetCapture(item.Id); await shell.RefreshAsync();
+                return "Capture removed";
+            });
         }
         else
         {
+            if (shell.Session != null)
+            {
+                shell.Feedback.Show(outcome.Message, outcome.OfferScreenshot ? "Screenshot" : null,
+                    outcome.OfferScreenshot ? async () => { await HandleHotkeyAsync(2); return null; } : null, false);
+                return;
+            }
             if (outcome.OfferScreenshot) actions.Add(("Capture screenshot", () => _ = HandleHotkeyAsync(2)));
             if (outcome.OpenApp) actions.Add(("Open " + Product.Name, ShowMain)); Notify(outcome.Message, actions, true);
         }
@@ -185,6 +195,14 @@ public partial class App : Application
     private void Notify(string message, IEnumerable<(string Label, Action Run)> actions, bool essential = false)
     {
         if (!settings.NotificationsEnabled && !essential) return;
+        if (shell.Session != null)
+        {
+            toast?.Close();
+            var first = actions.FirstOrDefault();
+            shell.Feedback.Show(message, first.Run == null ? null : first.Label,
+                first.Run == null ? null : () => { first.Run(); return Task.FromResult<string?>(null); }, !essential);
+            return;
+        }
         toast?.Close(); toast = new ToastWindow(message, actions); PositionAbovePanel(toast); toast.Show();
     }
     private async Task Guard(Func<Task> work)
@@ -229,8 +247,7 @@ public partial class App : Application
         toast?.Close(); hotkeys?.Dispose();
         if (icon != null) { icon.Visible = false; icon.ContextMenuStrip?.Dispose(); icon.Dispose(); }
         stateIcon?.Dispose();
-        if (tray != null) { tray.AllowClose = true; tray.Close(); }
-        if (panel != null) { panel.AllowClose = true; panel.Close(); }
+        companion?.Dispose();
         if (main != null) { main.AllowClose = true; main.Close(); }
         services?.GetService<ILocalLog>()?.Event("application.stopped"); services?.Dispose();
         if (ownsMutex) singleInstance?.ReleaseMutex(); singleInstance?.Dispose(); base.OnExit(e);
